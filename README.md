@@ -18,7 +18,7 @@ Self-hosted OBDA (Ontology-Based Data Access) platform in a single Docker contai
 - **🎨 平台搭建本体** — 不装 Protégé，浏览器里建类、对象属性、数据属性，支持公理，实时拓扑图预览
 - **🔗 平台搭建映射** — 三步向导：选表 → 系统按外键关系自动推荐 JOIN → 生成 OBDA 映射
 - **⚡ 虚拟路线（开箱即用）** — Ontop 端点内嵌容器，查询时自动拉起，SQL 实时转 RDF，数据不落盘
-- **📦 物化路线（可选）** — 自研并行 ABox 生成引擎，千万级三元组约 7 分钟，QLever 秒级查询
+- **📦 物化路线（同样开箱即用）** — QLever 已内置同一容器，自研并行 ABox 生成引擎千万级三元组约 7 分钟，秒级图查询
 - **💬 自然语言问数** — 配一个 DeepSeek API Key，中文提问 → 自动生成 SPARQL → 执行 → 回人话答案
 - **🗂️ 多工作空间** — 多套本体/映射/数据源隔离，一键切换
 - **🔌 对外 REST API** — `/sparql`、`/api/ask`、`/api/ontology/summary`，Dify / 外部系统改个 URL 就能接
@@ -26,6 +26,8 @@ Self-hosted OBDA (Ontology-Based Data Access) platform in a single Docker contai
 支持 **MySQL** 与 **达梦 DM8**（国产数据库友好）。
 
 ## 架构
+
+**单容器全栈**——虚拟与物化两条查询路线都内置，无需部署第二个容器：
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -41,10 +43,11 @@ Self-hosted OBDA (Ontology-Based Data Access) platform in a single Docker contai
 │  │ · 查询登记簿/行数截断     │   └────────┬──────────┘  │
 │  │ · LLM 三跳问答          │            │ abox.nt     │
 │  └────┬──────────────┬───┘            ▼             │
-│       │ 虚拟路线       │ 物化路线   ┌────────┐         │
-│  ┌────▼─────┐        └──────────►│ QLever │(可选容器)│
-│  │  Ontop   │                    └────────┘ :7001   │
-│  └────┬─────┘                                       │
+│       │ 虚拟路线       │ 物化路线   ┌────────────────┐ │
+│  ┌────▼─────┐        └──────────►│ QLever (内置)   │ │
+│  │  Ontop   │  查询时自动拉起      │ 守护进程自动重建 │ │
+│  └────┬─────┘                    │ 索引 :7001(内部)│ │
+│       │                          └────────────────┘ │
 └───────┼─────────────────────────────────────────────┘
         ▼ SQL (JDBC)
    ┌─────────┐
@@ -53,8 +56,8 @@ Self-hosted OBDA (Ontology-Based Data Access) platform in a single Docker contai
    └─────────┘
 ```
 
-**虚拟路线**：SPARQL → Ontop 实时翻译成 SQL 查库，适合数据频繁变化的场景，零额外容器。
-**物化路线**：先把数据生成为 RDF 三元组文件，QLever 建索引查询，适合大数据量、复杂图查询。
+**虚拟路线**：SPARQL → Ontop 实时翻译成 SQL 查库，适合数据频繁变化的场景。
+**物化路线**：先把数据生成为 RDF 三元组，QLever 建索引查询，适合大数据量、复杂图查询；ABox 变化时守护进程自动重建索引，无需任何手动操作。
 
 ## 快速开始
 
@@ -125,21 +128,14 @@ curl http://localhost:8010/api/ontology/summary
 
 完整接口与参数说明见页面顶栏 **API** 按钮。
 
-## 物化路线（可选，进阶）
+## 两条查询路线，用户无需关心部署
 
-需要额外部署一个 QLever 容器，用于「物化」查询模式与大体积 ABox：
+QLever 与看守进程已内置在镜像中，ABox 生成/上传/切换工作空间后索引**自动重建**，物化路线开箱即用：
 
-1. 准备 QLever 容器（镜像含 `qlever-index` / `qlever-server`），挂载两个目录：
-   - 平台数据目录 → `/abox:ro`
-   - 索引工作目录 → `/data`
-2. 容器内运行看守脚本（ABox 变化自动重建索引）：
-   ```bash
-   # 脚本在本仓库 deploy/qlever/watch-abox.sh
-   docker exec -d <qlever容器> bash /data/watch-abox.sh
-   ```
-3. 平台 `config.yaml` 里确认 `rdf_store.base_url` 指向 QLever 端点（默认 `http://host.docker.internal:7001`）
+- **虚拟**：查询实时翻译成 SQL，数据永远最新，适合日常问数
+- **物化**：页面「③ 生成 ABox」一次物化，之后图查询走索引，适合大数据量、复杂关联
 
-之后在页面「③ 生成 ABox」点生成，索引就绪即可切到物化路线查询。
+> 进阶：想用外置 QLever（如已有的独立集群）？挂载自定义 `config.yaml` 覆盖 `rdf_store.base_url` 即可，参考 `deploy/qlever/watch-abox.sh`（外置看守版）。
 
 ## 开发模式
 
@@ -159,7 +155,7 @@ docker push zddsl/easy-ontology:latest
 ## 致谢
 
 - [Ontop](https://ontop-vkg.org/) (Apache-2.0) — 虚拟知识图谱引擎，`ontop-cli-5.5.0/` 随仓库分发
-- [QLever](https://qlever.cs.uni-freiburg.de/) — 超高性能 RDF 索引与查询
+- [QLever](https://qlever.cs.uni-freiburg.de/) (Apache-2.0) — 超高性能 RDF 索引与查询，二进制取自官方镜像内置分发
 - [WebVOWL / Ontology Playground](https://github.com/VisualDataWeb/Ontology-Playground) — 拓扑图可视化
 
 ## License

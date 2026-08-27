@@ -47,7 +47,14 @@ ARG VITE_BASE_PATH=/playground/
 RUN VITE_BASE_PATH="$VITE_BASE_PATH" npm run build
 
 ############################
-# prod：全量打进镜像
+# qlever：物化引擎二进制与运行库（固定 digest 防上游漂移）
+# 只取 qlever-index/qlever-server 与其依赖库（ICU74 等 bookworm 源里没有），
+# 不引入官方镜像的 entrypoint 与其他内容
+############################
+FROM adfreiburg/qlever@sha256:119355a81be22d3fb5d61d2236986bd2c6351c5c3fc82c0b2b293a7e08c83724 AS qlever
+
+############################
+# prod：全量打进镜像（内置 QLever，单容器同时提供虚拟+物化路线）
 ############################
 FROM base AS prod
 ARG PIP_INDEX_URL
@@ -58,5 +65,20 @@ COPY tools /app/tools
 # 默认配置打进镜像：docker run 单容器即可跑；compose 挂载同名文件可覆盖
 COPY config.yaml /app/config.yaml
 COPY --from=playground-build /build/build /app/backend/static/playground
+# QLever：二进制 + 8 个依赖库（LD_LIBRARY_PATH 只在启动脚本内生效，不污染全局）
+COPY --from=qlever /qlever/qlever-index /qlever/qlever-server /qlever-bin/
+COPY --from=qlever /usr/lib/x86_64-linux-gnu/libgomp.so.1* \
+                   /usr/lib/x86_64-linux-gnu/libicui18n.so.74* \
+                   /usr/lib/x86_64-linux-gnu/libicuuc.so.74* \
+                   /usr/lib/x86_64-linux-gnu/libjemalloc.so.2* \
+                   /usr/lib/x86_64-linux-gnu/libssl.so.3* \
+                   /usr/lib/x86_64-linux-gnu/libstdc++.so.6* \
+                   /usr/lib/x86_64-linux-gnu/liburing.so.2* \
+                   /usr/lib/x86_64-linux-gnu/libzstd.so.1* \
+                   /qlever-libs/
+COPY deploy/qlever/watch-builtin.sh deploy/qlever/entrypoint.sh /app/deploy/qlever/
+RUN chmod +x /app/deploy/qlever/*.sh /qlever-bin/* \
+    # 物化路线指向容器内内置 QLever（源码里的默认值给开发期外置容器用）
+    && sed -i 's|host.docker.internal:7001|127.0.0.1:7001|' /app/config.yaml
 EXPOSE 8000
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/deploy/qlever/entrypoint.sh"]

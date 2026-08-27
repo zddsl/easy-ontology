@@ -35,7 +35,8 @@ services:
       - "8010:8000"               # 同 dev：宿主 8000 已被占用
     volumes:
       - ./data:/app/data              # 项目持久化，容器重建不丢
-      - ./config.yaml:/app/config.yaml:ro
+    # 注意：不挂载 config.yaml——镜像内已内置（物化路线指向容器内 QLever）。
+    # 需要自定义时挂载同名文件覆盖即可。
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
