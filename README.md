@@ -66,7 +66,7 @@ docker run -d --name easy-ontology \
   -v easy-ontology-data:/app/data \
   --add-host=host.docker.internal:host-gateway \
   --restart unless-stopped \
-  <your-dockerhub-username>/easy-ontology:latest
+  zddsl/easy-ontology:latest
 ```
 
 打开 `http://localhost:8010` 即可使用。数据（本体/映射/配置）持久化在 `easy-ontology-data` 卷里。
@@ -76,7 +76,7 @@ docker run -d --name easy-ontology \
 ### 方式二：源码构建
 
 ```bash
-git clone https://github.com/<your-github-username>/easy-ontology.git
+git clone https://github.com/zddsl/easy-ontology.git
 cd easy-ontology
 docker compose --profile prod up -d --build
 ```
@@ -152,8 +152,8 @@ docker compose --profile dev up --build
 ## 发布镜像（维护者）
 
 ```bash
-docker build --target prod -t <your-dockerhub-username>/easy-ontology:latest .
-docker push <your-dockerhub-username>/easy-ontology:latest
+docker build --target prod -t zddsl/easy-ontology:latest .
+docker push zddsl/easy-ontology:latest
 ```
 
 ## 致谢
