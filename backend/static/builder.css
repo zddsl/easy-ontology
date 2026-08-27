@@ -1,0 +1,38 @@
+/* builder 页专用布局（通用 .btn/.panel/.hint/.error 等复用 style.css） */
+.builder-main { display: grid; grid-template-columns: 380px 1fr; gap: 14px; padding: 14px 20px; align-items: start; }
+@media (max-width: 1000px) { .builder-main { grid-template-columns: 1fr; } }
+
+.ns-label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #566; }
+#ns-input { padding: 7px 9px; border: 1px solid #cdd6e0; border-radius: 6px; font-size: 13px; font-family: Consolas, monospace; width: 100%; }
+#ns-preview { color: #2e86de; font-family: Consolas, monospace; }
+
+.bgroup h3 { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 6px; }
+
+.blist { list-style: none; max-height: 220px; overflow: auto; border: 1px solid #e1e7ef; border-radius: 8px; }
+.blist li { padding: 7px 10px; border-bottom: 1px solid #eef2f7; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.blist li:last-child { border-bottom: 0; }
+.blist li:hover { background: #f0f4f9; }
+.blist li.selected { background: #e3effc; border-left: 3px solid #2e86de; padding-left: 7px; }
+.blist li .iname { font-family: Consolas, monospace; font-size: 13px; }
+.blist li .ilabel { font-size: 12px; color: #7a8aa0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.blist li.empty { color: #a5b1c2; cursor: default; font-size: 12px; }
+.blist li.empty:hover { background: none; }
+
+.builder-right { min-height: 420px; position: sticky; top: 14px; }
+.editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 4px; }
+.editor-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #566; }
+.editor-grid input, .editor-grid select, .editor-grid textarea { padding: 7px 9px; border: 1px solid #cdd6e0; border-radius: 6px; font-size: 13px; width: 100%; }
+.editor-grid textarea { resize: vertical; font-family: inherit; }
+.editor-grid input.iri { font-family: Consolas, monospace; }
+.editor-grid .full { grid-column: 1 / -1; }
+
+.editor-grid .checklist { display: flex; flex-wrap: wrap; gap: 4px 14px; border: 1px solid #e1e7ef; border-radius: 6px; padding: 7px 9px; max-height: 108px; overflow: auto; background: #fafbfd; }
+.editor-grid .checklist .chk { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: #344; }
+.editor-grid .checklist .chk input { width: auto; }
+.editor-grid .checklist .none { color: #a5b1c2; font-size: 12px; }
+
+.warnbox { margin-top: 10px; padding: 10px 12px; border: 1px solid #f5d7b5; background: #fdf6ec; border-radius: 8px; font-size: 12.5px; color: #7a5b28; }
+.warnbox h4 { font-size: 13px; margin-bottom: 6px; }
+.warnbox ul { padding-left: 18px; }
+.warnbox li { margin: 2px 0; }
+.warnbox .close { float: right; cursor: pointer; border: 0; background: none; color: #b98a2f; font-size: 14px; }

@@ -1,0 +1,367 @@
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import cytoscape from 'cytoscape';
+import fcose from 'cytoscape-fcose';
+import type { Core } from 'cytoscape';
+import { useDesignerStore } from '../../store/designerStore';
+import { useAppStore, type ThemeId } from '../../store/appStore';
+import { serializeToRDF } from '../../lib/rdf/serializer';
+import { parseRDF } from '../../lib/rdf/parser';
+import { highlightRdf, RDF_HIGHLIGHT_DARK, RDF_HIGHLIGHT_LIGHT } from '../../lib/rdf/highlighter';
+
+cytoscape.use(fcose);
+
+export function DesignerPreview() {
+  const [activeTab, setActiveTab] = useState<'graph' | 'rdf'>('graph');
+  const { ontology, selectEntity, selectRelationship } = useDesignerStore();
+  const theme = useAppStore((s) => s.theme);
+
+  return (
+    <div className="designer-preview">
+      <div className="designer-preview-tabs">
+        <button
+          className={`designer-tab ${activeTab === 'graph' ? 'active' : ''}`}
+          onClick={() => setActiveTab('graph')}
+        >
+          Graph
+        </button>
+        <button
+          className={`designer-tab ${activeTab === 'rdf' ? 'active' : ''}`}
+          onClick={() => setActiveTab('rdf')}
+        >
+          RDF
+        </button>
+      </div>
+
+      {activeTab === 'graph' ? (
+        <GraphPreview
+          ontology={ontology}
+          theme={theme}
+          onSelectEntity={selectEntity}
+          onSelectRelationship={selectRelationship}
+        />
+      ) : (
+        <RdfPreview ontology={ontology} onImported={() => setActiveTab('graph')} />
+      )}
+    </div>
+  );
+}
+
+// ─── Graph tab ───────────────────────────────────────────────────────────────
+
+interface GraphPreviewProps {
+  ontology: { entityTypes: { id: string; name: string; icon: string; color: string; extendsId?: string }[]; relationships: { id: string; name: string; from: string; to: string; cardinality: string }[] };
+  theme: ThemeId;
+  onSelectEntity: (id: string | null) => void;
+  onSelectRelationship: (id: string | null) => void;
+}
+
+function GraphPreview({ ontology, theme, onSelectEntity, onSelectRelationship }: GraphPreviewProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<Core | null>(null);
+
+  const buildElements = useCallback(() => {
+    const nodes = ontology.entityTypes.map((e) => ({
+      data: { id: e.id, label: `${e.icon} ${e.name}`, color: e.color },
+    }));
+    const nodeIds = new Set(nodes.map((n) => n.data.id));
+    const edges = ontology.relationships
+      .filter((r) => nodeIds.has(r.from) && nodeIds.has(r.to))
+      .map((r) => ({
+        data: { id: r.id, source: r.from, target: r.to, label: r.name },
+      }));
+    // is-a edges for entity type inheritance (rdfs:subClassOf): child → parent
+    const isaEdges = ontology.entityTypes
+      .filter((e) => e.extendsId && nodeIds.has(e.extendsId) && e.extendsId !== e.id)
+      .map((e) => ({
+        data: { id: `isa-${e.id}`, source: e.id, target: e.extendsId!, label: 'is-a', isa: 'true' },
+      }));
+    return [...nodes, ...edges, ...isaEdges];
+  }, [ontology]);
+
+  // Create graph; recreate on theme change. Graph colors are read from the
+  // active theme's CSS custom properties so each theme uses its own palette.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const cssVars = getComputedStyle(containerRef.current);
+    const themeColors = {
+      nodeText: cssVars.getPropertyValue('--graph-node-text').trim() || '#B3B3B3',
+      edgeColor: cssVars.getPropertyValue('--graph-edge-color').trim() || '#6E6E6E',
+      edgeText: cssVars.getPropertyValue('--graph-edge-text').trim() || '#9CA0A8',
+      edgeLabelBg: cssVars.getPropertyValue('--graph-edge-label-bg').trim() || '#15161D',
+    };
+    const cy = cytoscape({
+      container: containerRef.current,
+      elements: buildElements(),
+      style: [
+        {
+          selector: 'node',
+          style: {
+            label: 'data(label)',
+            'text-valign': 'bottom',
+            'text-halign': 'center',
+            'font-size': '13px',
+            'font-family': 'Segoe UI, sans-serif',
+            'font-weight': 600,
+            color: themeColors.nodeText,
+            'text-margin-y': 8,
+            width: 60,
+            height: 60,
+            'background-color': 'data(color)',
+            'border-width': 2,
+            'border-color': 'data(color)',
+            'border-opacity': 0.5,
+          },
+        },
+        {
+          selector: 'edge',
+          style: {
+            label: 'data(label)',
+            'font-size': '11px',
+            'font-family': 'Segoe UI, sans-serif',
+            color: themeColors.edgeText,
+            'text-rotation': 'autorotate',
+            'text-margin-y': -8,
+            'text-background-color': themeColors.edgeLabelBg,
+            'text-background-opacity': 1,
+            'text-background-padding': '2px',
+            'text-background-shape': 'roundrectangle',
+            width: 2,
+            'line-color': themeColors.edgeColor,
+            'target-arrow-color': themeColors.edgeColor,
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier',
+          },
+        },
+        {
+          // is-a inheritance edge: dashed and lighter than relationship edges
+          selector: 'edge[isa = true]',
+          style: {
+            width: 1.5,
+            'line-style': 'dashed',
+            opacity: 0.8,
+            'font-style': 'italic',
+          },
+        },
+      ],
+      layout: {
+        name: ontology.entityTypes.length > 0 ? 'fcose' : 'grid',
+        animate: false,
+        fit: true,
+        padding: 40,
+        nodeDimensionsIncludeLabels: true,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+      minZoom: 0.3,
+      maxZoom: 3,
+    });
+
+    cy.on('tap', 'node', (evt) => onSelectEntity(evt.target.id()));
+    cy.on('tap', 'edge', (evt) => {
+      // is-a edges are visual only — no relationship entity to select
+      if (evt.target.data('isa')) return;
+      onSelectRelationship(evt.target.id());
+    });
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) {
+        onSelectEntity(null);
+        onSelectRelationship(null);
+      }
+    });
+
+    cyRef.current = cy;
+    return () => { cy.destroy(); cyRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]); // Recreate on theme change to re-read CSS colors
+
+  // Incrementally sync nodes & edges without full relayout
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    const currentNodeIds = new Set(cy.nodes().map((n) => n.id()));
+    const currentEdgeIds = new Set(cy.edges().map((e) => e.id()));
+    const desiredNodeIds = new Set(ontology.entityTypes.map((e) => e.id));
+    const desiredEdgeIds = new Set([
+      ...ontology.relationships.map((r) => r.id),
+      ...ontology.entityTypes.filter((e) => e.extendsId).map((e) => `isa-${e.id}`),
+    ]);
+
+    // Remove deleted elements
+    const toRemove = cy.elements().filter((ele) => {
+      const id = ele.id();
+      return ele.isNode() ? !desiredNodeIds.has(id) : !desiredEdgeIds.has(id);
+    });
+    if (toRemove.length) toRemove.remove();
+
+    // Add new nodes
+    const newNodes: { data: Record<string, string> }[] = [];
+    for (const entity of ontology.entityTypes) {
+      if (!currentNodeIds.has(entity.id)) {
+        newNodes.push({ data: { id: entity.id, label: `${entity.icon} ${entity.name}`, color: entity.color } });
+      }
+    }
+
+    // Add new edges
+    const newEdges: { data: Record<string, string> }[] = [];
+    for (const rel of ontology.relationships) {
+      if (!currentEdgeIds.has(rel.id)) {
+        newEdges.push({ data: { id: rel.id, source: rel.from, target: rel.to, label: rel.name } });
+      }
+    }
+    for (const entity of ontology.entityTypes) {
+      if (entity.extendsId && !currentEdgeIds.has(`isa-${entity.id}`)) {
+        newEdges.push({ data: { id: `isa-${entity.id}`, source: entity.id, target: entity.extendsId, label: 'is-a', isa: 'true' } });
+      }
+    }
+
+    if (newNodes.length || newEdges.length) {
+      cy.add([...newNodes, ...newEdges]);
+      // Only lay out NEW nodes near existing ones, keeping existing positions
+      if (newNodes.length) {
+        const newEles = cy.collection();
+        for (const n of newNodes) {
+          newEles.merge(cy.getElementById(n.data.id));
+        }
+        // Position new nodes near the center of the viewport
+        const { x1, y1, w, h } = cy.extent();
+        const cx = x1 + w / 2;
+        const cy2 = y1 + h / 2;
+        newEles.forEach((ele, i) => {
+          ele.position({ x: cx + (i - newNodes.length / 2) * 80, y: cy2 });
+        });
+      }
+      cy.fit(undefined, 40);
+    }
+
+    // Update cosmetic data on existing elements
+    for (const entity of ontology.entityTypes) {
+      const node = cy.getElementById(entity.id);
+      if (node.length) {
+        node.data('label', `${entity.icon} ${entity.name}`);
+        node.data('color', entity.color);
+      }
+    }
+    for (const rel of ontology.relationships) {
+      const edge = cy.getElementById(rel.id);
+      if (edge.length) {
+        edge.data('label', rel.name);
+      }
+    }
+  }, [ontology]);
+
+  return <div ref={containerRef} className="designer-graph-container" />;
+}
+
+// ─── RDF tab ─────────────────────────────────────────────────────────────────
+
+interface RdfPreviewProps {
+  ontology: GraphPreviewProps['ontology'] & { name: string; description: string };
+  onImported: () => void;
+}
+
+function RdfPreview({ ontology, onImported }: RdfPreviewProps) {
+  const [copied, setCopied] = useState(false);
+  const [importMode, setImportMode] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importNotes, setImportNotes] = useState<string[]>([]);
+  const loadDraft = useDesignerStore((s) => s.loadDraft);
+
+  let rdfOutput: string;
+  try {
+    rdfOutput = serializeToRDF(ontology as Parameters<typeof serializeToRDF>[0], []);
+  } catch {
+    rdfOutput = '<!-- Ontology is incomplete or invalid; fix errors to see RDF output -->';
+  }
+
+  const darkMode = useAppStore((s) => s.darkMode);
+  const hlTheme = darkMode ? RDF_HIGHLIGHT_DARK : RDF_HIGHLIGHT_LIGHT;
+  const highlightedRdf = useMemo(() => highlightRdf(rdfOutput, hlTheme), [rdfOutput, hlTheme]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(rdfOutput).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleImport = () => {
+    const trimmed = importText.trim();
+    if (!trimmed) {
+      setImportError('Paste RDF/XML content first');
+      return;
+    }
+    try {
+      // Infer identifiers so pasted standard OWL (e.g. Protégé exports)
+      // passes the designer's validation
+      const { ontology: parsed, warnings } = parseRDF(trimmed, { inferIdentifiers: true });
+      loadDraft(parsed);
+      setImportMode(false);
+      setImportText('');
+      setImportError(null);
+      setImportNotes(warnings);
+      onImported();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to parse RDF');
+      setImportNotes([]);
+    }
+  };
+
+  const handleCancel = () => {
+    setImportMode(false);
+    setImportText('');
+    setImportError(null);
+    setImportNotes([]);
+  };
+
+  return (
+    <div className="designer-rdf-container">
+      <div className="designer-rdf-toolbar">
+        {importMode ? (
+          <>
+            <button className="designer-add-btn small" onClick={handleImport}>
+              Load into Designer
+            </button>
+            <button className="designer-add-btn small secondary" onClick={handleCancel}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="designer-add-btn small" onClick={() => { setImportMode(true); setImportText(rdfOutput); }}>
+              Edit RDF
+            </button>
+            <button className="designer-add-btn small" onClick={handleCopy}>
+              {copied ? 'Copied!' : 'Copy RDF'}
+            </button>
+          </>
+        )}
+      </div>
+      {importError && (
+        <div className="designer-import-error">{importError}</div>
+      )}
+      {!importError && importNotes.length > 0 && (
+        <div className="designer-import-notes">
+          <strong>Import notes:</strong>
+          <ul>
+            {importNotes.map((note, i) => (
+              <li key={i}>{note}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {importMode ? (
+        <textarea
+          className="designer-rdf-source designer-rdf-textarea"
+          value={importText}
+          onChange={(e) => { setImportText(e.target.value); setImportError(null); setImportNotes([]); }}
+          placeholder="Paste or edit RDF/XML content here…"
+          autoFocus
+          spellCheck={false}
+        />
+      ) : (
+        <pre className="designer-rdf-source">{highlightedRdf}</pre>
+      )}
+    </div>
+  );
+}

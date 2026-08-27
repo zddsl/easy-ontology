@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Easy Ontology 控制台</title>
+<link rel="stylesheet" href="style.css?v=26">
+</head>
+<body>
+<header>
+  <div class="brand">Easy Ontology</div>
+  <div id="ws-bar" class="ws-bar"></div>
+  <div class="header-right">
+    <span id="state-badge" class="badge">EMPTY</span>
+    <span id="ontop-info" class="ontop-info"></span>
+    <button id="btn-settings" class="btn" onclick="openSettings()">配置</button>
+    <div class="api-pop">
+      <button id="btn-api" class="btn" onclick="toggleApiCard(event)" title="对外查询 API 的调用方式与参数">API</button>
+      <div id="api-card" class="api-card" style="display:none"></div>
+    </div>
+  </div>
+</header>
+<div id="builder-toast" class="toast" style="display:none"></div>
+
+<main>
+  <!-- 左列：配置 -->
+  <section class="panel config">
+    <h2>① 数据源</h2>
+    <div class="form-grid">
+      <label>类型
+        <select id="ds-type" onchange="typeHint()">
+          <option value="dm8">达梦 DM8</option>
+          <option value="mysql" selected>MySQL</option>
+        </select>
+      </label>
+      <label>host <input id="ds-host" value="host.docker.internal"></label>
+      <label>port <input id="ds-port" value="3306"></label>
+      <label>库名 <input id="ds-database" value="company"></label>
+      <label>用户 <input id="ds-user" value="root"></label>
+      <label>密码 <input id="ds-password" type="password" value="123456"></label>
+    </div>
+    <p id="ds-hint" class="hint"></p>
+    <div class="btn-row">
+      <button class="btn" onclick="saveDatasource()">保存配置</button>
+      <button class="btn" id="btn-test" onclick="testConnection()">测试连接</button>
+      <span id="ping-result" class="ping-result"></span>
+    </div>
+
+    <h2>② 本体与映射</h2>
+    <div class="subhead">本体</div>
+    <div class="mode-switch">
+      <button class="mode-btn active" id="mode-upload" onclick="setOntologyMode('upload')">上传</button>
+      <button class="mode-btn" id="mode-builder" onclick="setOntologyMode('builder')">平台搭建</button>
+    </div>
+
+    <div id="ont-upload">
+      <div class="upload-row">
+        <label>本体（.rdf/.owl/.ttl，Turtle 自动转）<input type="file" id="file-ontology" accept=".rdf,.owl,.ttl,.n3"></label>
+        <button class="btn" onclick="uploadOntology()">上传本体</button>
+        <span id="ontology-result" class="upload-result"></span>
+        <button class="btn small danger" onclick="clearOntology()">清空本体</button>
+      </div>
+    </div>
+    <div id="ont-builder" style="display:none">
+      <div class="builder-row">
+        <button class="btn secondary" onclick="location.href='/builder.html'">去搭建本体 →</button>
+        <span id="builder-draft-status" class="hint">草稿：加载中…</span>
+        <span id="builder-ontology-status" class="hint"></span>
+        <button class="btn small danger" onclick="clearOntology()">清空本体</button>
+      </div>
+    </div>
+
+    <div class="subhead">映射</div>
+    <div class="mode-switch">
+      <button class="mode-btn active" id="map-mode-upload" onclick="setMappingMode('upload')">上传</button>
+      <button class="mode-btn" id="map-mode-builder" onclick="setMappingMode('builder')">平台搭建</button>
+    </div>
+    <div id="map-upload">
+      <div class="upload-row">
+        <label>映射（.obda）<input type="file" id="file-mapping" accept=".obda"></label>
+        <button class="btn" onclick="uploadMapping()">上传映射</button>
+        <span id="mapping-result" class="upload-result"></span>
+        <button class="btn small danger" onclick="clearMapping()">清空映射</button>
+      </div>
+    </div>
+    <div id="map-builder" style="display:none">
+      <div class="builder-row">
+        <button class="btn secondary" onclick="location.href='/mapping.html'">去搭建映射 →</button>
+        <span id="mapping-draft-status" class="hint">草稿：加载中…</span>
+        <span id="mapping-current-status" class="hint"></span>
+        <button class="btn small danger" onclick="clearMapping()">清空映射</button>
+      </div>
+    </div>
+
+    <h2>③ 生成 ABox</h2>
+    <div class="mode-switch">
+      <button class="mode-btn" id="abox-enable" onclick="setAboxEnabled(true)">开启</button>
+      <button class="mode-btn active" id="abox-disable" onclick="setAboxEnabled(false)">关闭</button>
+    </div>
+    <div id="abox-panel" style="display:none">
+      <div class="btn-row">
+        <button class="btn" id="btn-materialize" onclick="doMaterialize()">生成 ABox</button>
+        <label class="btn secondary" id="btn-abox-upload">
+          NT 文件生成 ABox
+          <input type="file" id="file-abox" accept=".nt,.ttl,.rdf" style="display:none" onchange="uploadAbox()">
+        </label>
+        <button class="btn" onclick="viewAbox()">查看</button>
+        <button class="btn" id="btn-clear-abox" onclick="clearAbox()">清除</button>
+      </div>
+      <div id="abox-status" class="ping-result">未生成</div>
+      <span id="abox-upload-result" class="hint"></span>
+    </div>
+  </section>
+
+  <!-- 中列：拓扑图 -->
+  <section class="panel graph">
+    <h2>本体拓扑图</h2>
+    <div id="graph-container">
+      <iframe id="graph-frame" style="display:none"></iframe>
+      <div id="graph-placeholder">本体上传后这里显示拓扑图（Playground 构建后生效）</div>
+    </div>
+    <button class="btn small" onclick="refreshGraph()">刷新图</button>
+  </section>
+</main>
+
+<!-- 底部：自然语言问答（DeepSeek） -->
+<section class="panel ask">
+  <h2>自然语言问答</h2>
+  <div class="ask-row">
+    <textarea id="ask-question" rows="2" placeholder="用中文问一句，例如：有多少名员工？工资超过 20000 的都有谁？"></textarea>
+    <div class="ask-actions">
+      <span id="ask-key-status" class="hint"></span>
+      <label class="hint">查询路线
+        <select id="ask-route">
+          <option value="virtual">虚拟（直查数据库）</option>
+          <option value="materialized">物化（查已生成数据）</option>
+        </select>
+      </label>
+      <button class="btn primary" id="btn-ask" onclick="askLLM()">问</button>
+    </div>
+  </div>
+  <div id="ask-error" class="error"></div>
+  <div id="ask-answer" class="ask-answer"></div>
+  <details id="ask-details" style="display:none">
+    <summary>查看生成的 SPARQL 与 CSV 结果</summary>
+    <div class="ask-meta" id="ask-meta"></div>
+    <pre id="ask-sparql" class="ask-sparql"></pre>
+    <pre id="ask-csv" class="ask-csv"></pre>
+  </details>
+</section>
+
+<!-- 底部：SPARQL -->
+<section class="panel sparql">
+  <h2>SPARQL 查询</h2>
+  <div class="query-row">
+    <textarea id="query-text" rows="6" spellcheck="false" placeholder="输入 SPARQL 查询"></textarea>
+    <div class="query-actions">
+      <select id="query-route" title="虚拟=Ontop 实时查数据库；物化=QLever 查已生成 ABox（需先生成/上传并索引就绪）">
+        <option value="virtual">虚拟（直查数据库）</option>
+        <option value="materialized">物化（查已生成数据）</option>
+      </select>
+      <button class="btn primary" id="btn-run" onclick="runQuery()">执行</button>
+      <label class="accept"><input type="checkbox" id="json-mode"> JSON 格式</label>
+    </div>
+  </div>
+  <div id="query-error" class="error"></div>
+  <div id="result-meta" class="result-meta"></div>
+  <div class="table-wrap"><table id="result-table"></table></div>
+
+  <h3>查询登记簿</h3>
+  <div class="table-wrap"><table id="queries-table"></table></div>
+</section>
+
+<!-- 查询详情弹框 -->
+<div id="query-detail-modal" class="ws-modal" style="display:none" onclick="if(event.target===this)closeQueryDetail()">
+  <div class="ws-modal-box ws-modal-wide">
+    <div class="ws-modal-title">查询详情</div>
+    <div id="query-detail-body"></div>
+    <div class="ws-modal-actions">
+      <button class="btn" onclick="closeQueryDetail()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 全局配置弹框 -->
+<div id="settings-modal" class="ws-modal" style="display:none" onclick="if(event.target===this)closeSettings()">
+  <div class="ws-modal-box">
+    <div class="ws-modal-title">全局 LLM 配置</div>
+    <p class="ws-modal-hint">自然语言问答和自动生成本体/映射需要用到（编写中）</p>
+    <label class="ns-label">DeepSeek API Key
+      <input id="settings-key" type="password" placeholder="sk-..." autocomplete="off">
+    </label>
+    <div id="settings-msg" class="ws-modal-err"></div>
+    <div class="ws-modal-actions">
+      <button class="btn" onclick="closeSettings()">关闭</button>
+      <button class="btn primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=36"></script>
+<script src="ws.js?v=3"></script>
+</body>
+</html>

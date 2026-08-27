@@ -1,0 +1,13 @@
+# 构建上下文瘦身：运行时数据与生成物不进镜像
+data/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+
+# playground 依赖与产物（构建阶段全新 npm ci；本地 junction 也别进上下文）
+playground/node_modules/
+playground/build/
+
+# 本机应急脚本
+run.bat
+build_playground.bat

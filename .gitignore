@@ -1,0 +1,33 @@
+# ===== 运行时数据：绝不入库（含 LLM API Key、数据库凭据、真实业务数据）=====
+data/
+
+# ===== 私有数据与一次性脚本 =====
+hd_simple.nt
+generate_nt_from_mysql.py
+generate_nt_from_mysql.sh
+validate_nt.py
+
+# ===== 本机应急脚本 =====
+run.bat
+build_playground.bat
+
+# ===== Python =====
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# ===== Node / Playground =====
+playground/node_modules/
+playground/build/
+
+# ===== AI 工具本地配置 =====
+.claude/
+CLAUDE.md
+.clinerules/
+.cursor/
+
+# ===== 系统杂项 =====
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,44 @@
+# easy_ontology 配置（容器内路径为主；本机 run.bat 应急时改 cli_dir/launcher_windows）
+backend:
+  host: 0.0.0.0
+  port: 8000
+
+ontop:
+  cli_dir: /app/ontop-cli-5.5.0
+  launcher_linux: ontop            # 容器内（ontop-cli 根目录的 shell 脚本）
+  launcher_windows: ontop17.bat    # Windows 本机应急（自动锁 JDK17）
+  port: 8083                       # 容器内部端口，不经 /sparql 代理不对外
+  boot_timeout_s: 60               # 就绪轮询上限（实测 ~4s）
+
+sparql:
+  timeout_s: 180                   # 单查询超时；DM 上两跳/宽 COUNT 常需 60-120s
+  max_rows: 1000                   # SELECT 结果行数上限，超出截断并标记
+
+rdf_store:
+  base_url: "http://host.docker.internal:7001"   # 容器访问宿主机 QLever（qlever 容器）
+  kind: qlever                                   # 端点就是 /sparql（无数据集路径）
+  enabled: true
+
+db_types:
+  mysql:
+    driver: com.mysql.cj.jdbc.Driver
+    url_template: "jdbc:mysql://{host}:{port}/{database}"
+    url_params: "useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai"
+    ping_classpath: "/app/ontop-cli-5.5.0/jdbc/*"
+    hint: "宿主机上的 MySQL，host 填 host.docker.internal"
+  dm8:
+    driver: dm.jdbc.driver.DmDriver
+    url_template: "jdbc:dm://{host}:{port}"
+    url_params: ""
+    ping_classpath: "/app/ontop-cli-5.5.0/jdbc/*"
+    hint: "达梦 URL 不带库名（schema 即用户）；映射 source 表名需全限定带引号，如 \"HD_SAAS\".\"WORKORDER\""
+
+paths:
+  data_dir: /app/data              # 唯一事实源：本体/映射/properties/日志都在这
+
+tools:
+  java_bin: java
+  javac_bin: javac
+  dbping_classpath_default: "/app/ontop-cli-5.5.0/jdbc/*"
+
+auto_start_last_project: true      # 重启系统后自动复活上次 RUNNING 的端点

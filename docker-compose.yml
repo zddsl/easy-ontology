@@ -1,0 +1,68 @@
+# 双 profile：
+#   开发：docker compose --profile dev up --build
+#   正式：docker compose --profile prod up -d --build
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    profiles: ["dev"]
+    container_name: easy-ontology-dev
+    init: true                    # tini 收僵尸（ontop 子进程死后 PID1 不 reap）
+    ports:
+      - "8010:8000"               # 宿主 8000 被本机 Anaconda python（app_device_qa_safety）占用，让出
+    volumes:
+      - ./backend:/app/backend        # 源码热重载
+      - ./tools:/app/tools
+      - ./playground:/app/playground  # 容器内 npm 构建用
+      # node_modules 用 named volume 隔离，绝不落在 Windows bind mount 上
+      - playground_node_modules:/app/playground/node_modules
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 宿主 MySQL 用
+    environment:
+      EASY_ONTOLOGY_ENV: dev
+
+  prod:
+    build:
+      context: .
+      target: prod
+    profiles: ["prod"]
+    container_name: easy-ontology
+    init: true
+    ports:
+      - "8010:8000"               # 同 dev：宿主 8000 已被占用
+    volumes:
+      - ./data:/app/data              # 项目持久化，容器重建不丢
+      - ./config.yaml:/app/config.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # 一次性构建 Playground（fork 产物）：docker compose --profile build run --rm playground-builder
+  playground-builder:
+    image: node:20-slim
+    profiles: ["build"]
+    container_name: easy-playground-builder
+    working_dir: /src
+    volumes:
+      - ./playground:/src
+      - playground_node_modules:/src/node_modules   # 依赖隔离在 named volume，不落宿主
+      - ./backend/static:/out
+    environment:
+      VITE_BASE_PATH: /playground/
+    command: sh -c "npm ci --registry=https://registry.npmmirror.com && npm run build && rm -rf /out/playground && cp -r build /out/playground && echo BUILD-OK"
+
+volumes:
+  playground_node_modules:
+
+networks:
+  default:
+    name: easy_ontology_net
+    ipam:
+      # 钉死网段：Docker 默认池(172.17-31)随机分配，若与数据库所在内网网段重叠，
+      # 发往数据库的包会被劫进容器网桥（No route to host）。10.99.x 与常见环境无冲突。
+      config:
+        - subnet: 10.99.0.0/24
+          gateway: 10.99.0.1

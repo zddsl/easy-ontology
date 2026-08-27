@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Easy Ontology · 平台搭建本体</title>
+<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="builder.css?v=3">
+</head>
+<body>
+<header>
+  <div class="brand">Easy Ontology<span class="sub">平台搭建本体</span></div>
+  <div id="ws-bar" class="ws-bar"></div>
+  <div class="header-right">
+    <span id="save-status" class="ontop-info">加载中…</span>
+    <a class="btn" href="/">← 返回控制台</a>
+  </div>
+</header>
+
+<main class="builder-main">
+  <!-- 左列：命名空间 + 元素列表 -->
+  <section class="panel builder-left">
+    <label class="ns-label">命名空间前缀（须以 # 或 / 结尾）
+      <input id="ns-input" spellcheck="false" placeholder="http://tohi.cn/2026/onto#" oninput="onNamespace(this.value)">
+    </label>
+    <div class="hint">所有类/属性挂其下，如 <code id="ns-preview"></code></div>
+
+    <div class="bgroup">
+      <h3><span>类（<span id="cnt-classes">0</span>）</span>
+        <button class="btn small" onclick="addItem('classes')">＋ 添加</button>
+      </h3>
+      <ul id="list-classes" class="blist"></ul>
+    </div>
+    <div class="bgroup">
+      <h3><span>对象属性（<span id="cnt-oprops">0</span>）</span>
+        <button class="btn small" onclick="addItem('objectProperties')">＋ 添加</button>
+      </h3>
+      <ul id="list-oprops" class="blist"></ul>
+    </div>
+    <div class="bgroup">
+      <h3><span>数据属性（<span id="cnt-dprops">0</span>）</span>
+        <button class="btn small" onclick="addItem('dataProperties')">＋ 添加</button>
+      </h3>
+      <ul id="list-dprops" class="blist"></ul>
+    </div>
+  </section>
+
+  <!-- 右列：编辑表单 -->
+  <section class="panel builder-right">
+    <h2 id="editor-title">在左侧选择或添加元素</h2>
+    <div id="editor-form"></div>
+
+    <div class="btn-row">
+      <button class="btn warn" id="btn-del" onclick="removeSelected()">删除选中</button>
+      <button class="btn" id="btn-import" onclick="importSaved()">导入已保存本体…</button>
+      <button class="btn primary" id="btn-commit" onclick="commitDraft()">生成并保存本体</button>
+    </div>
+    <div id="issues" class="error"></div>
+    <div id="import-warnings" class="warnbox" style="display:none"></div>
+  </section>
+</main>
+
+<script src="builder.js?v=4"></script>
+<script src="ws.js?v=3"></script>
+</body>
+</html>
