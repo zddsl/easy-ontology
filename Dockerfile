@@ -77,8 +77,8 @@ COPY --from=qlever /usr/lib/x86_64-linux-gnu/libgomp.so.1* \
                    /usr/lib/x86_64-linux-gnu/libzstd.so.1* \
                    /qlever-libs/
 COPY deploy/qlever/watch-builtin.sh deploy/qlever/entrypoint.sh /app/deploy/qlever/
+# 物化路线指向容器内内置 QLever（源码里的默认值给开发期外置容器用）
 RUN chmod +x /app/deploy/qlever/*.sh /qlever-bin/* \
-    # 物化路线指向容器内内置 QLever（源码里的默认值给开发期外置容器用）
     && sed -i 's|host.docker.internal:7001|127.0.0.1:7001|' /app/config.yaml
 EXPOSE 8000
 CMD ["/app/deploy/qlever/entrypoint.sh"]
