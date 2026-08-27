@@ -277,7 +277,6 @@ async function restartEndpoint() {
     if (r.boot_ms !== undefined) showMeta(`端点 ${r.status}（pid ${r.pid}，启动 ${r.boot_ms}ms）`);
   } catch (e) { showError(e.message); }
   refreshStatus();
-  fillApiCardDynamic();
 }
 
 /* ---------- 顶栏 API 卡片：暴露对外查询接口与参数 ---------- */
@@ -287,7 +286,7 @@ function toggleApiCard(ev) {
   const card = $("api-card");
   const willOpen = card.style.display === "none";
   card.style.display = willOpen ? "block" : "none";
-  if (willOpen) { buildApiCard(); fillApiCardDynamic(); }
+  if (willOpen) buildApiCard();
 }
 
 // 点卡片外任意处收起（按钮自身已 stopPropagation）
@@ -342,23 +341,7 @@ function buildApiCard() {
       </div>
       <div class="hint">返回 <code>{ns, classes, obj_props, dt_props}</code>；classes/props 已附中文名与描述，外部 LLM 可直接用来组装提示词</div>
     </div>
-    <div class="api-sec">
-      <h4>直连底层端点<em>可选</em></h4>
-      <div class="api-line">Ontop（虚拟）<code>${origin.replace(/:\d+$/, "")}:8083/sparql</code> <span id="api-ontop-state"></span></div>
-      <div class="api-line">QLever（物化）<code>${origin.replace(/:\d+$/, "")}:7001/sparql</code></div>
-      <div class="hint">平台 /sparql 已做代理并随工作空间自动切换，一般无需直连</div>
-    </div>
     <div class="api-foot">端点卡死（查询一直挂起）时：<a href="javascript:void(0)" onclick="restartEndpoint()">重启端点</a></div>`;
-}
-
-async function fillApiCardDynamic() {
-  const el = $("api-ontop-state");
-  if (!el) return;
-  try {
-    const s = await api("/api/status");
-    el.textContent = s.ontop ? `（运行中 · pid ${s.ontop.pid}）` : "（未运行，查询时自动启动）";
-    el.className = s.ontop ? "api-state-ok" : "api-state-off";
-  } catch { el.textContent = ""; }
 }
 
 function copyApi(btn) {

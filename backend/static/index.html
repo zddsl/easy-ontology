@@ -155,7 +155,7 @@
   <div class="query-row">
     <textarea id="query-text" rows="6" spellcheck="false" placeholder="输入 SPARQL 查询"></textarea>
     <div class="query-actions">
-      <select id="query-route" title="虚拟=Ontop 实时查数据库；物化=QLever 查已生成 ABox（需先生成/上传并索引就绪）">
+      <select id="query-route" title="虚拟=Ontop 实时查数据库；物化=QLever 查已生成 ABox（先生成/上传 ABox，索引自动构建）">
         <option value="virtual">虚拟（直查数据库）</option>
         <option value="materialized">物化（查已生成数据）</option>
       </select>
@@ -198,7 +198,7 @@
   </div>
 </div>
 
-<script src="app.js?v=36"></script>
+<script src="app.js?v=37"></script>
 <script src="ws.js?v=3"></script>
 </body>
 </html>
