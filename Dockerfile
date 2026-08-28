@@ -9,16 +9,26 @@ ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 ############################
+# jdk：Temurin 17 整目录 COPY（免 apt——大体积 JDK 安装步骤在部分环境不稳；
+# 含 javac 供 DbPing 容器内编译，jammy 的 glibc 与 bookworm 向下兼容）
+############################
+FROM eclipse-temurin:17-jdk-jammy AS jdk
+
+############################
 # base：python + jdk17 + ontop-cli
 ############################
-FROM python:3.11-slim-bookworm AS base
-    # bookworm 固定：trixie 仓库已下架 openjdk-17
-    # 国内网络：apt 换阿里云源（bookworm 的 deb822 格式）
+# trixie 固定：QLever 二进制要求 glibc>=2.38（bookworm 只有 2.36）；
+# JDK 走 Temurin COPY，不依赖发行版源（trixie 源已无 openjdk-17 也不碍事）
+FROM python:3.11-slim-trixie AS base
+    # 国内网络：apt 换阿里云源（deb822 格式）
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources || true
-    # jdk-headless 带 javac：DbPing 需要容器内编译；procps 供 psutil/进程树杀
+    # procps 供 pkill（看守脚本杀 qlever-server）；JDK 走上面的 COPY 不走 apt
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openjdk-17-jdk-headless procps curl \
+    && apt-get install -y --no-install-recommends procps curl \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=jdk /opt/java/openjdk /opt/jdk
+ENV JAVA_HOME=/opt/jdk
+ENV PATH="/opt/jdk/bin:$PATH"
 WORKDIR /app
 COPY ontop-cli-5.5.0 /app/ontop-cli-5.5.0
 ENV ONTOP_HOME=/app/ontop-cli-5.5.0
@@ -65,13 +75,17 @@ COPY tools /app/tools
 # 默认配置打进镜像：docker run 单容器即可跑；compose 挂载同名文件可覆盖
 COPY config.yaml /app/config.yaml
 COPY --from=playground-build /build/build /app/backend/static/playground
-# QLever：二进制 + 8 个依赖库（LD_LIBRARY_PATH 只在启动脚本内生效，不污染全局）
+# QLever：二进制 + DT_NEEDED 精确清单（boost1.83/ICU74 等 bookworm 没有或版本更旧的；
+# glibc/libm/libgcc/openssl 用基底自带的，绝不覆盖——拷 Ubuntu 的 glibc 会符号崩溃）
 COPY --from=qlever /qlever/qlever-index /qlever/qlever-server /qlever-bin/
-COPY --from=qlever /usr/lib/x86_64-linux-gnu/libgomp.so.1* \
+COPY --from=qlever /usr/lib/x86_64-linux-gnu/libboost_iostreams.so.1.83* \
+                   /usr/lib/x86_64-linux-gnu/libboost_program_options.so.1.83* \
+                   /usr/lib/x86_64-linux-gnu/libboost_url.so.1.83* \
+                   /usr/lib/x86_64-linux-gnu/libgomp.so.1* \
+                   /usr/lib/x86_64-linux-gnu/libicudata.so.74* \
                    /usr/lib/x86_64-linux-gnu/libicui18n.so.74* \
                    /usr/lib/x86_64-linux-gnu/libicuuc.so.74* \
                    /usr/lib/x86_64-linux-gnu/libjemalloc.so.2* \
-                   /usr/lib/x86_64-linux-gnu/libssl.so.3* \
                    /usr/lib/x86_64-linux-gnu/libstdc++.so.6* \
                    /usr/lib/x86_64-linux-gnu/liburing.so.2* \
                    /usr/lib/x86_64-linux-gnu/libzstd.so.1* \
