@@ -54,7 +54,7 @@ class _Job:
     """一次生成任务的运行态（字段简单赋值，读侧 get_job 汇总）。"""
 
     def __init__(self, store):
-        self.phase = "running"          # running | merging | done | error | canceled
+        self.phase = "running"          # running | merging | auditing | done | error | canceled
         self.started_at = time.time()
         self.finished_at: float | None = None
         self.workers_total = 0
@@ -108,7 +108,7 @@ def _log(job: _Job, msg: str) -> None:
 def cancel_job() -> bool:
     """取消进行中的 job（杀 SqlStream 子进程）；不可取消返回 False。"""
     job = _current
-    if job is None or job.phase not in ("running", "merging"):
+    if job is None or job.phase not in ("running", "merging", "auditing"):
         return False
     job.cancel_event.set()
     for p in list(job.procs.values()):

@@ -1,6 +1,7 @@
 """项目路由：上传本体/映射/ABox、数据源表单、测试连接、状态。"""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -11,6 +12,47 @@ from backend.services.project_store import get_store, _now_str
 from backend.services.properties_builder import validate_form
 
 router = APIRouter(prefix="/api", tags=["project"])
+
+
+def _label_warning(g) -> dict | None:
+    """A2 使用者反馈：本体类/属性缺中文标签时告警（问答靠 label 匹配，缺了就答错）。
+
+    统计 owl:Class/rdfs:Class 与各属性类型里缺中文 rdfs:label/skos 标签的占比，
+    超 20% 才告警；返回 None 表示无需警告。
+    """
+    from rdflib import RDF, OWL, RDFS, URIRef
+    from rdflib.namespace import SKOS
+
+    cjk = re.compile(r"[一-鿿]")
+    ents: set = set()
+    for t in (OWL.Class, RDFS.Class, OWL.ObjectProperty, OWL.DatatypeProperty,
+              OWL.AnnotationProperty, RDF.Property):
+        ents.update(g.subjects(RDF.type, t))
+    ents = {s for s in ents if isinstance(s, URIRef)}
+    if not ents:
+        return None
+
+    def has_zh(s) -> bool:
+        for pred in (RDFS.label, SKOS.prefLabel, SKOS.altLabel):
+            for v in g.objects(s, pred):
+                if cjk.search(str(v)):
+                    return True
+        return False
+
+    missing = sorted((str(s) for s in ents if not has_zh(s)))
+    if len(missing) * 5 <= len(ents):  # 缺中文 ≤20%：不打扰
+        return None
+
+    def name(iri: str) -> str:
+        return iri.rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+
+    return {
+        "total": len(ents),
+        "missing": len(missing),
+        "names": [name(s) for s in missing[:20]],
+        "message": (f"⚠ {len(missing)}/{len(ents)} 个类/属性没有中文标签，"
+                    f"智能问答可能匹配不上，建议补齐 rdfs:label 后重新上传"),
+    }
 
 
 # ---------- 本体上传 ----------
@@ -46,7 +88,12 @@ async def upload_ontology(file: UploadFile = File(...)):
 
     store = get_store()
     store.save_ontology(stored, name, source_format, origin="upload")
-    return {"state": store.state, "triples": n_triples, "format": source_format}
+    try:
+        warning = _label_warning(g)
+    except Exception:
+        warning = None  # 检测失败不拦上传
+    return {"state": store.state, "triples": n_triples, "format": source_format,
+            "label_warning": warning}
 
 
 # ---------- 映射上传 ----------

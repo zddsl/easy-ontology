@@ -7,8 +7,10 @@ RDFS 公理加宽），越出模式的构造直接 UnsupportedMappingError。
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -180,9 +182,9 @@ def compile_target(mid: str, target: str, prefixes: dict[str, str]) -> dict:
 
     for pred_s, obj_s in parsed:
         pred = _expand(pred_s, prefixes, f"映射 {mid} 的谓语")
-        if obj_s.startswith('"'):
-            # 字面量：只认 "{COL}"^^xsd:xxx（或裸 "{COL}" 视为 string）
-            lm = re.match(r'^"(\{[A-Za-z0-9_]+\})"(?:\^\^(\S+))?$', obj_s)
+        if obj_s.startswith('"') or re.match(r'^\{[A-Za-z0-9_]+\}(?:\^\^\S+)?$', obj_s):
+            # 字面量：只认 "{COL}"^^xsd:xxx（或裸 "{COL}" 视为 string；引号可省，兼容旧映射生成器的非 string 无引号写法）
+            lm = re.match(r'^"?(\{[A-Za-z0-9_]+\})"?(?:\^\^(\S+))?$', obj_s)
             if not lm:
                 raise UnsupportedMappingError(
                     f"映射 {mid} 的字面量只支持单列占位 \"{{COL}}\"^^类型（不支持拼接/函数/语言标签）：{obj_s}")
@@ -191,6 +193,9 @@ def compile_target(mid: str, target: str, prefixes: dict[str, str]) -> dict:
                 xsd = XSD_NS + "string"
             else:
                 xsd = _expand(lm.group(2), prefixes, f"映射 {mid} 的字面量类型")
+                # 小写 datetime 是表单类型别名，归一为标准 XSD 名 dateTime
+                if xsd == XSD_NS + "datetime":
+                    xsd = XSD_NS + "dateTime"
                 if xsd not in XSD_OK:
                     raise UnsupportedMappingError(f"映射 {mid} 不支持的字面量类型：{obj_s}")
             props.append({"kind": "lit", "pred": pred, "col": col, "xsd": xsd})
@@ -488,9 +493,22 @@ def run(prepared: dict, store, state, cancel: threading.Event, log_path: Path) -
     state.phase = "merging"
     tmp = store.abox_path.with_suffix(".nt.tmp")
     part_files = " ".join(str(parts_dir / f"part-{i}.nt") for i in range(len(compiled)))
-    rc = subprocess.run(["sh", "-c", f"cat {part_files} | sort -u > {tmp}"]).returncode
-    if rc != 0 or not tmp.exists():
+    # sort 结果先落容器本地 /tmp 再拷回挂载卷：Windows 绑定挂载扛不住 GB 级长流写
+    # （sort: write failed: Input/output error 之坑）；挂载卷上只做一次顺序拷贝 + 同目录原子改名
+    staged = Path(tempfile.gettempdir()) / f"abox-sorted-{os.getpid()}.nt"
+    rc = subprocess.run(
+        ["sh", "-c", f"cat {part_files} | sort -u -T {tempfile.gettempdir()} > {staged}"]).returncode
+    if rc != 0 or not staged.exists():
+        staged.unlink(missing_ok=True)
         raise AboxGenError(f"合并去重失败（sort 退出码 {rc}）")
+    try:
+        with open(staged, "rb") as src, open(tmp, "wb") as dst:
+            while chunk := src.read(1 << 22):
+                dst.write(chunk)
+        if tmp.stat().st_size != staged.stat().st_size:
+            raise AboxGenError("合并结果拷回挂载卷后大小不符")
+    finally:
+        staged.unlink(missing_ok=True)
     total = 0
     with open(tmp, "rb") as f:
         while chunk := f.read(1 << 22):
@@ -499,6 +517,21 @@ def run(prepared: dict, store, state, cancel: threading.Event, log_path: Path) -
     tmp.replace(store.abox_path)
     for old in parts_dir.iterdir():
         old.unlink(missing_ok=True)
+
+    # 数据质量体检（A5）：源库只读统计悬空键/脏值，失败只记日志不影响产物
+    state.phase = "auditing"
+    quality = None
+    try:
+        from backend.services.abox_audit import audit
+        quality = audit(prepared, store, state, cancel, log_path)
+    except CanceledError:
+        raise
+    except Exception as e:
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"[{time.strftime('%F %T')}] 体检失败（不影响物化产物）：{e}\n")
+        except OSError:
+            pass
 
     from backend.services.project_store import _now_str
     elapsed_ms = int((time.time() - t0) * 1000)
@@ -509,6 +542,8 @@ def run(prepared: dict, store, state, cancel: threading.Event, log_path: Path) -
         "source": "builtin",
         "workers": len(compiled),
         "elapsed_ms": elapsed_ms,
+        "quality": quality,
     })
     return {"triples": total, "size_bytes": size,
-            "workers": len(compiled), "elapsed_ms": elapsed_ms}
+            "workers": len(compiled), "elapsed_ms": elapsed_ms,
+            "quality": quality}

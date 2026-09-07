@@ -111,11 +111,15 @@ async def forward(query: str, accept: str, route: str = "virtual", meta: dict | 
 
     try:
         async with httpx.AsyncClient(timeout=cfg.sparql.timeout_s) as client:
-            r = await client.post(
-                target,
-                data={"query": query},
-                headers={"Accept": accept} if accept else {},
-            )
+            payload = {"query": query}
+            req_headers = {"Accept": accept} if accept else {}
+            r = await client.post(target, data=payload, headers=req_headers)
+            # 429 = 端点并发槽满（QLever -j 已到 3 仍挤上）：退避重试，用户端无感
+            for wait in (2, 5, 10):
+                if r.status_code != 429:
+                    break
+                await asyncio.sleep(wait)
+                r = await client.post(target, data=payload, headers=req_headers)
         _finish(entry, "done", int((time.time() - t0) * 1000))
         return r, entry["id"]
     except httpx.TimeoutException:

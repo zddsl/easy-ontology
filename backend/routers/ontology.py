@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import JSONResponse
 
 from backend.services.project_store import get_store
 
@@ -23,7 +24,12 @@ def ontology_rdf(viewer: int = 0):
             text = enrich(text, store.mapping_path.read_text(encoding="utf-8"))
         except Exception as e:
             text = p.read_text(encoding="utf-8")
-    return Response(content=text, media_type="application/rdf+xml; charset=utf-8")
+    # no-store：本体随编辑/上传随时变，绝不允许中间代理缓存旧副本
+    return Response(
+        content=text,
+        media_type="application/rdf+xml; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/summary")
@@ -47,9 +53,12 @@ def ontology_summary():
     rdf_xml = p.read_text(encoding="utf-8")
     summary = summarize_ontology(rdf_xml)
 
-    return {
-        "ns": summary["ns"],
-        "classes": summary["classes"],
-        "obj_props": summary["obj_props"],
-        "dt_props": summary["dt_props"],
-    }
+    return JSONResponse(
+        {
+            "ns": summary["ns"],
+            "classes": summary["classes"],
+            "obj_props": summary["obj_props"],
+            "dt_props": summary["dt_props"],
+        },
+        headers={"Cache-Control": "no-store"},
+    )
