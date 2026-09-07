@@ -67,7 +67,13 @@ docker run -d --name easy-ontology \
   zddsl/easy-ontology:latest
 ```
 
-打开 `http://localhost:8010` 即可使用。数据（本体/映射/配置）持久化在 `easy-ontology-data` 卷里。
+**容器启动后，浏览器访问 `http://localhost:8010`** 即可进入 Web 控制台（映射到容器内 8000 端口；数据持久化在 `easy-ontology-data` 卷里）。
+
+> 如果部署在其他机器/服务器上，把 `localhost` 换成那台机器的 IP，例如 `http://192.168.1.100:8010`。
+
+控制台长这样——左边配数据源、管本体与映射、一键物化；中间是本体拓扑图；下面是自然语言问答与 SPARQL 查询：
+
+![Easy Ontology 控制台：数据源配置、本体拓扑图、自然语言问答与 SPARQL 查询](docs/screenshot-main.png)
 
 > 数据库在宿主机上？host 填 `host.docker.internal` 即可连通。
 >
