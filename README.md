@@ -148,6 +148,19 @@ docker compose --profile dev up --build
 
 源码 bind mount + uvicorn 热重载；Playground 前端改动用 `--profile build` 重新构建。
 
+### 开发用外置 QLever 容器
+
+开发环境除后端容器外还跑一个独立 `qlever` 容器（物化引擎，端口 7001）。容器没了别手敲
+`docker run`——参数多且镜像必须按 digest 钉死，直接用脚本原样重建：
+
+```bash
+bash deploy/qlever/run-dev-container.sh --force   # 重建（镜像按 sha256 钉死，永不漂移）
+bash deploy/qlever/regression-limit.sh            # 动过 QLever 版本后跑：ORDER BY+LIMIT 对拍回归
+```
+
+升级 QLever 的正确姿势：改 `run-dev-container.sh` 与 `Dockerfile` 里的 digest → 重建 →
+跑 `regression-limit.sh` 对拍，PASS 才算升级成功。
+
 ## 发布镜像（维护者）
 
 ```bash

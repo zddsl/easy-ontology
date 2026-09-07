@@ -491,6 +491,8 @@ def parse_ontology_for_builder(rdf_text: str) -> dict:
         if range_local and range_local not in IMPORT_XSD_MAP:
             warnings.append(f"数据属性「{name}」的 xsd:{range_local} 不在支持列表，降级为 string")
             range_local = "string"
+        elif range_local:
+            range_local = IMPORT_XSD_MAP[range_local]  # 归一为表单类型（dateTime→datetime），否则校验判无效
         if not range_local:
             range_local = "string"
         dprops.append({

@@ -8,10 +8,12 @@
                   "domain_cols":[…], "range_cols":[…]}],
    "edited_obda": None, "updated_at": "…"}
 
-mode 由表选择自动推导（不手选）：
-  domain_fk —— FK 在 domain 类的表：并入类映射（target 加一行边）
-  range_fk  —— FK 在 range  类的表：独立映射 + WHERE fk IS NOT NULL（range 端 IRI 用 B 自己的主键）
-  junction  —— 第三张表（多对多中间表）：独立映射，不加 WHERE
+mode 由表选择自动推导（不手选）；三种模式的边一律**独立成条 + INNER JOIN 对端表**（默认验货：
+外键对不上对端行的边直接不生成，防脏外键假边/幽灵个体；类映射保持纯净不 join——否则脏外键行
+会把个体连同属性一起滤掉）：
+  domain_fk —— FK 在 domain 类的表：s=domain 表，join range 表 ON fk=pk
+  range_fk  —— FK 在 range  类的表：s=range 表，join domain 表 ON fk=pk（range 端 IRI 用 B 自己的主键）
+  junction  —— 第三张表（多对多中间表）：s=中间表，双亲各 join 一次
 多列主键/外键按数组顺序拼接 IRI（:emp/{site_id}-{id}）；边对象 IRI 的分隔符用**被引用类自己的 iri_sep**，
 与其类映射主语模板保持一致，否则同一实体两个 IRI、边查询断链。
 """
@@ -208,6 +210,16 @@ def validate_draft(draft: dict, elements: dict, schema: dict | None = None) -> t
 
     # 类侧
     seen_sig: dict[tuple, str] = {}
+    parent_of = {c["iri"]: c.get("parentIri") for c in elements["classes"]}
+    elem_name = {c["iri"]: c["name"] for c in elements["classes"]}
+
+    def _ancestors(iri: str) -> set[str]:
+        out, cur = set(), parent_of.get(iri)
+        while cur and cur not in out:
+            out.add(cur)
+            cur = parent_of.get(cur)
+        return out
+
     for c in draft["classes"]:
         if c["iri"] not in elem_cls and (c.get("table") or c.get("pk")):
             warnings.append(f"草稿里的类 {c['name']} 在当前本体中不存在，已跳过")
@@ -222,13 +234,19 @@ def validate_draft(draft: dict, elements: dict, schema: dict | None = None) -> t
         if not c.get("pk"):
             warnings.append(f"类 {e['name']} 选了表但未选主键，该类映射将被跳过")
             continue
-        if not c.get("props"):
+        # 子类不勾属性属正常：属性由父类映射统一发出（同表子类拆分模式）
+        if not c.get("props") and not e.get("parentIri"):
             warnings.append(f"类 {e['name']} 未勾选任何数据属性")
         sig = (c["table"], tuple(c["pk"]))
         if sig in seen_sig:
-            warnings.append(f"类 {seen_sig[sig]} 与 {e['name']} 同表同主键，个体 IRI 将完全重叠")
+            other = seen_sig[sig]
+            # 父子/同祖的类同表共 IRI 空间是子类模式的预期形态（靠 WHERE/类型断言区分），不算重叠事故
+            related = other in _ancestors(e["iri"]) or e["iri"] in _ancestors(other) \
+                or bool(_ancestors(e["iri"]) & _ancestors(other))
+            if not related:
+                warnings.append(f"类 {elem_name.get(other, other)} 与 {e['name']} 同表同主键，个体 IRI 将完全重叠")
         else:
-            seen_sig[sig] = e["name"]
+            seen_sig[sig] = e["iri"]
         cols = _schema_columns(schema, c["table"])
         for p in c.get("props") or []:
             if not p.get("col"):
@@ -325,9 +343,8 @@ def generate_obda(draft: dict, elements: dict, db_type: str = "mysql", scope: st
         if c["iri"] not in mapped and (c.get("table") or c.get("pk")):
             warnings.append(f"类 {c['name']} 未完成映射（缺表或缺主键），已跳过")
 
-    # 边预分拣：domain_fk 并入类映射；range_fk/junction 独立成条
-    embedded: dict[str, list[dict]] = {iri: [] for iri in mapped}
-    standalone: list[tuple[dict, dict, dict]] = []  # (rel, A, B)
+    # 边统一独立成条（INNER JOIN 验货）；类映射不再内嵌边
+    edges: list[tuple[dict, dict, dict]] = []  # (rel, A, B)
     for r in draft["relations"]:
         if not (r.get("table") and r.get("domain_cols")):
             continue
@@ -335,14 +352,15 @@ def generate_obda(draft: dict, elements: dict, db_type: str = "mysql", scope: st
         if not (a and b):
             warnings.append(f"关系 {r['name']} 的一端类未完成映射，已跳过")
             continue
-        if r["mode"] == "domain_fk" and len(r["domain_cols"]) == len(b["pk"]):
-            embedded[a["iri"]].append(r)
-        elif r["mode"] == "range_fk" and len(r["domain_cols"]) == len(a["pk"]):
-            standalone.append((r, a, b))
-        elif r["mode"] == "junction" and len(r["domain_cols"]) == len(a["pk"]) and len(r["range_cols"]) == len(b["pk"]):
-            standalone.append((r, a, b))
+        ok = ((r["mode"] == "domain_fk" and len(r["domain_cols"]) == len(b["pk"]))
+              or (r["mode"] == "range_fk" and len(r["domain_cols"]) == len(a["pk"]))
+              or (r["mode"] == "junction" and len(r["domain_cols"]) == len(a["pk"])
+                  and len(r["range_cols"]) == len(b["pk"])))
+        if ok:
+            edges.append((r, a, b))
         else:
             warnings.append(f"关系 {r['name']} 的列配置与目标类主键数不符，已跳过")
+    edges.sort(key=lambda x: x[0]["name"])
 
     used_ids: set[str] = set()
 
@@ -368,41 +386,44 @@ def generate_obda(draft: dict, elements: dict, db_type: str = "mysql", scope: st
             if not p.get("col"):
                 continue
             rng = dp_range.get(p["iri"], "string")
-            lit = f'"{{{p["col"]}}}"^^xsd:string' if rng == "string" else f"{{{p['col']}}}^^xsd:{rng}"
+            rng = "dateTime" if rng == "datetime" else rng  # 表单类型名 → 标准 XSD 局部名（abox 生成器/严格解析器都认驼峰）
+            lit = f'"{{{p["col"]}}}"^^xsd:{rng}'
             parts.append(f":{p['name']} {lit}")
             if p["col"] not in cols:
                 cols.append(p["col"])
-        for r in embedded[c["iri"]]:
-            b = mapped[r["rangeIri"]]
-            obj = _tpl(r["domain_cols"], b["iri_path"] or b["name"].lower(), b["iri_sep"] or "-")
-            parts.append(f":{r['name']} {obj}")
-            for col in r["domain_cols"]:
-                if col not in cols:
-                    cols.append(col)
         blocks.append(
             f"mappingId\t{mid_for(c['name'])}\n"
             f"target\t\t{' ; '.join(parts)} .\n"
             f"source\t\tSELECT {', '.join(cols)} FROM {table_ref(c['table'])}"
         )
 
-    for r, a, b in standalone:
+    for r, a, b in edges:
         a_path, a_sep = a["iri_path"] or a["name"].lower(), a["iri_sep"] or "-"
         b_path, b_sep = b["iri_path"] or b["name"].lower(), b["iri_sep"] or "-"
-        b_cols = r["range_cols"] if r["mode"] == "junction" else b["pk"]
-        # 列名冲突（如自引用 leads 的 lead_id 与 id 不同名则免；同名的 junction 才需要别名）
-        d_alias = {c: f"a_{i}" for i, c in enumerate(r["domain_cols"]) if c in b_cols}
-        b_alias = {c: f"b_{i}" for i, c in enumerate(b_cols) if c in r["domain_cols"]}
-        subj = _tpl([d_alias.get(c, c) for c in r["domain_cols"]], a_path, a_sep)
-        obj = _tpl([b_alias.get(c, c) for c in b_cols], b_path, b_sep)
-        select_cols = [f"{c} AS {d_alias[c]}" if c in d_alias else c for c in r["domain_cols"]]
-        select_cols += [f"{c} AS {b_alias[c]}" if c in b_alias else c for c in b_cols]
-        src = f"SELECT {', '.join(select_cols)} FROM {table_ref(r['table'])}"
-        if r["mode"] == "range_fk":
-            src += " WHERE " + " AND ".join(f"{c} IS NOT NULL" for c in r["domain_cols"])
+        if r["mode"] == "domain_fk":
+            subj = _tpl(a["pk"], a_path, a_sep)
+            obj = _tpl(r["domain_cols"], b_path, b_sep)
+            joins = [(b, list(zip(r["domain_cols"], b["pk"])))]
+        else:
+            subj = _tpl(r["domain_cols"], a_path, a_sep)
+            obj = _tpl(r["range_cols"] if r["mode"] == "junction" else b["pk"], b_path, b_sep)
+            joins = [(a, list(zip(r["domain_cols"], a["pk"])))]
+            if r["mode"] == "junction":
+                joins.append((b, list(zip(r["range_cols"], b["pk"]))))
+        # 子表列去重后统一 s. 前缀 + AS 裸名（join 下裸列名有歧义；SqlStream 表头取 getColumnLabel 认 AS）
+        sel = list(dict.fromkeys(
+            list(r["domain_cols"])
+            + (list(r["range_cols"]) if r["mode"] == "junction" else list(b["pk"]))
+            + (list(a["pk"]) if r["mode"] == "domain_fk" else [])))
+        select_cols = ", ".join(f"s.{c} AS {c}" for c in sel)
+        join_sql = " ".join(
+            f"INNER JOIN {table_ref(p['table'])} {tag} ON "
+            + " AND ".join(f"s.{fk} = {tag}.{pk}" for fk, pk in pairs)
+            for (p, pairs), tag in zip(joins, ("a", "b")))
         blocks.append(
             f"mappingId\t{mid_for(r['name'])}\n"
             f"target\t\t{subj} :{r['name']} {obj} .\n"
-            f"source\t\t{src}"
+            f"source\t\tSELECT {select_cols} FROM {table_ref(r['table'])} s {join_sql}"
         )
 
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -433,3 +454,120 @@ def validate_obda_text(text: str) -> tuple[bool, str, int]:
     if n == 0:
         return False, "映射里一条条目都没有", 0
     return True, "", n
+
+
+# ---------- 外键命中率抽检（防死外键边静默进图） ----------
+
+FK_SAMPLE_N = 200
+FK_TIMEOUT_S = 90
+_SQL_SEP = "\x01"  # 与 abox_gen/SqlStream 管道字段分隔一致
+
+
+def _fk_run_sql(ds: dict, sql: str) -> dict[str, str]:
+    """跑一条 SQL 返回首数据行（列名小写键）。复用 tools/SqlStream，与 ABox 生成同通道。"""
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from backend.config import get_config
+    from backend.services.properties_builder import build_jdbc_url
+
+    cfg = get_config()
+    tcfg = cfg.db_types[ds["db_type"]]
+    tools = Path(__file__).resolve().parent.parent.parent / "tools"
+    cp_sep = ";" if sys.platform == "win32" else ":"
+    classpath = cp_sep.join(filter(None, [
+        str(tools), tcfg.ping_classpath or cfg.tools.dbping_classpath_default]))
+    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False, encoding="utf-8") as f:
+        f.write(sql)
+        sql_file = f.name
+    try:
+        r = subprocess.run(
+            [cfg.tools.java_bin, "-Dfile.encoding=UTF-8", "-cp", classpath, "SqlStream",
+             build_jdbc_url(ds), ds["user"], ds["password"], tcfg.driver, sql_file],
+            capture_output=True, timeout=FK_TIMEOUT_S, cwd=str(tools))
+        lines = r.stdout.decode("utf-8", "replace").strip().splitlines()
+        if r.returncode != 0 or len(lines) < 2:
+            raise RuntimeError((r.stderr or r.stdout or b"").decode("utf-8", "replace")[:300] or "SqlStream 无输出")
+        header = [h.strip().lower() for h in lines[0].split(_SQL_SEP)]
+        row = lines[1].split(_SQL_SEP)
+        return dict(zip(header, row))
+    finally:
+        Path(sql_file).unlink(missing_ok=True)
+
+
+def check_fk_hit_rates(draft: dict, ds: dict, scope: str | None = None,
+                       sample_n: int = FK_SAMPLE_N, full: bool = True) -> dict:
+    """逐边验外键命中率：非空外键 LEFT JOIN 对端表数命中。
+
+    默认全量核对（DM8 实测单边 2~5 秒，索引 hash join）；抽样模式（full=False）按主键头尾各半，
+    但脏数据聚在表中段时会漏报（实测 ASSETSPEC 表头表尾 100% 干净、中段 33% 孤儿），仅作快速粗筛。
+    命中 0% = 死外键（无 join 胖映射会把整条边物化成幽灵）；<90% = 脏外键（部分悬空）。
+    单边失败不影响其余边。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    db_type = ds.get("db_type", "mysql")
+
+    def q(t: str) -> str:
+        # 与 generate_obda 的 table_ref 同规则：dm8 全限定 + 大写化
+        return f'"{scope}"."{t.upper()}"' if db_type == "dm8" and scope else t
+
+    mapped = {c["iri"]: c for c in draft["classes"] if c.get("table") and c.get("pk")}
+    checks: list[tuple[dict, str, list[str], str, list[str], str]] = []  # (rel, fk表, fk列, 对端表, 对端主键, 排序列)
+    for r in draft["relations"]:
+        if not (r.get("table") and r.get("domain_cols")):
+            continue
+        a, b = mapped.get(r.get("domainIri") or ""), mapped.get(r.get("rangeIri") or "")
+        if not (a and b):
+            continue
+        if r["mode"] == "domain_fk" and len(r["domain_cols"]) == len(b["pk"]):
+            checks.append((r, r["table"], r["domain_cols"], b["table"], b["pk"], a["pk"][0]))
+        elif r["mode"] == "range_fk" and len(r["domain_cols"]) == len(a["pk"]):
+            checks.append((r, r["table"], r["domain_cols"], a["table"], a["pk"], b["pk"][0]))
+        elif r["mode"] == "junction" and r.get("range_cols") and len(r["range_cols"]) == len(b["pk"]):
+            # 中间表抽 range 侧（domain 侧同表同理，抽一侧足够示警）
+            checks.append((r, r["table"], r["range_cols"], b["table"], b["pk"], r["domain_cols"][0]))
+
+    half = max(1, sample_n // 2)
+
+    def run_one(item):
+        r, fk_table, fks, other, pks, order_col = item
+        sel = ", ".join(fks)
+        on = " AND ".join(f"o.{pk} = s.{fk}" for pk, fk in zip(pks, fks))
+        out = {"name": r["name"], "mode": r["mode"], "fk_table": fk_table, "other_table": other}
+        try:
+            if full:
+                sql = (f"SELECT COUNT(*) AS total, COUNT(o.{pks[0]}) AS hit "
+                       f"FROM {q(fk_table)} s LEFT JOIN {q(other)} o ON {on} "
+                       f"WHERE s.{fks[0]} IS NOT NULL")
+                row = _fk_run_sql(ds, sql)
+                total, hit = int(row.get("total") or 0), int(row.get("hit") or 0)
+            else:
+                subs = []
+                if db_type == "dm8":
+                    subs.append(f"SELECT TOP {half} {sel} FROM {q(fk_table)} WHERE {fks[0]} IS NOT NULL")
+                    subs.append(f"SELECT TOP {half} {sel} FROM {q(fk_table)} WHERE {fks[0]} IS NOT NULL ORDER BY {order_col} DESC")
+                else:
+                    subs.append(f"SELECT {sel} FROM {q(fk_table)} WHERE {fks[0]} IS NOT NULL LIMIT {half}")
+                    subs.append(f"SELECT {sel} FROM {q(fk_table)} WHERE {fks[0]} IS NOT NULL ORDER BY {order_col} DESC LIMIT {half}")
+                total = hit = 0
+                for sub in subs:
+                    sql = (f"SELECT COUNT(*) AS total, COUNT(o.{pks[0]}) AS hit "
+                           f"FROM ({sub}) s LEFT JOIN {q(other)} o ON {on}")
+                    row = _fk_run_sql(ds, sql)
+                    total += int(row.get("total") or 0)
+                    hit += int(row.get("hit") or 0)
+            out.update(total=total, hit=hit,
+                       rate=(hit / total) if total else None,
+                       verdict=("empty" if not total else
+                                "dead" if hit == 0 else
+                                "warn" if hit / total < 0.9 else "ok"))
+        except Exception as e:
+            out.update(total=None, hit=None, rate=None, verdict="error", error=str(e).strip()[:200])
+        return out
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(run_one, checks))
+    return {"ok": True, "sample_n": sample_n, "full": full, "db_type": db_type, "results": results}

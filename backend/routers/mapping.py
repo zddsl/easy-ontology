@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import time
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Response
 from pydantic import BaseModel
 
 from backend.services import mapping_service as ms
@@ -51,6 +51,16 @@ def get_schema_route(refresh: bool = False):
 @router.get("/elements")
 def get_elements():
     return _elements()
+
+
+@router.get("/obda")
+def mapping_obda():
+    """输出当前工作空间已保存映射的 .obda 原文（纯文本）。"""
+    store = get_store()
+    p = store.mapping_path
+    if not p.exists():
+        raise HTTPException(404, "当前工作空间还没有已保存的映射")
+    return Response(content=p.read_text(encoding="utf-8"), media_type="text/plain; charset=utf-8")
 
 
 # ---------- 草稿 ----------
@@ -124,6 +134,17 @@ def generate(draft: dict = Body(...)):
 class CommitBody(BaseModel):
     draft: dict
     obda: str
+
+
+@router.post("/fk-check")
+def fk_check(draft: dict = Body(...)):
+    """逐边抽样外键命中率（默认 200 行）：0%=死外键（边会全悬空），<90%=脏外键（部分悬空）。"""
+    ds = _datasource()
+    try:
+        d = ms.normalize_mapping_draft(draft)
+    except ms.MappingDraftError as e:
+        raise HTTPException(422, str(e))
+    return ms.check_fk_hit_rates(d, ds, scope=schema_scope(ds)[1])
 
 
 @router.post("/commit")

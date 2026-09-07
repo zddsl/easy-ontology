@@ -83,18 +83,20 @@
       <h2>步骤③ 预览生成的映射（可直接修改）</h2>
       <div class="btn-row">
         <button class="btn small" onclick="gotoStep(2)">← 上一步</button>
+        <button class="btn small" id="btn-fkcheck" onclick="fkCheck()">🔍 检查外键命中率</button>
         <button class="btn small" id="btn-regen" onclick="regen(true)">重新生成</button>
         <button class="btn primary small" id="btn-commit" onclick="commitMapping()">保存映射</button>
       </div>
     </div>
     <div id="commit-result" class="okbox" style="display:none"></div>
     <div id="gen-warnings" class="warnbox" style="display:none"></div>
+    <div id="fk-result" class="warnbox" style="display:none"></div>
     <div class="step3-meta"><span id="gen-status" class="hint"></span><span class="hint">手改后点「保存映射」生效；回上一步再进来会按表单重新生成（覆盖手改）</span></div>
     <textarea id="obda-text" spellcheck="false" oninput="onObdaInput(this.value)"></textarea>
   </section>
 </main>
 
-<script src="mapping.js?v=16"></script>
+<script src="mapping.js?v=17"></script>
 <script src="ws.js?v=3"></script>
 </body>
 </html>

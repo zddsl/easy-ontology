@@ -521,6 +521,39 @@ async function regen(force) {
   await renderStep3();
 }
 
+// 外键命中率抽检：逐边抽样 join 对端表，0%=死外键（边会全悬空成幽灵）
+async function fkCheck() {
+  const box = $("fk-result");
+  box.style.display = "";
+  box.className = "warnbox";
+  box.textContent = "检查中…（逐边全量 LEFT JOIN 核对，约 5~30 秒）";
+  const btn = $("btn-fkcheck");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api("/api/mapping/fk-check", { method: "POST", body: draft });
+    const rows = r.results || [];
+    if (!rows.length) { box.textContent = "没有可检查的外键边（关系都没配表/列）"; return; }
+    const icon = { ok: "✅", warn: "⚠️", dead: "🚨", empty: "➖", error: "❓" };
+    const th = "border:1px solid #bbb;padding:3px 8px;text-align:left;background:#f5f5f5";
+    const td = "border:1px solid #bbb;padding:3px 8px";
+    box.innerHTML = `<h4>外键命中率核对（${r.full ? "全量" : `抽样 ${r.sample_n} 行`} · ${new Date().toLocaleTimeString()}）</h4>` +
+      `<table style="border-collapse:collapse"><tr><th style="${th}">边</th><th style="${th}">模式</th><th style="${th}">外键表 → 对端表</th><th style="${th}">命中 / 样本</th><th style="${th}">判定</th></tr>` +
+      rows.map(x => {
+        const hit = x.total == null ? `❓ ${esc(x.error || "查询失败")}`
+          : `${x.hit} / ${x.total}${x.rate != null ? `（${(x.rate * 100).toFixed(1)}%）` : ""}`;
+        return `<tr><td style="${td}">${esc(x.name)}</td><td style="${td}">${esc(x.mode)}</td>` +
+          `<td style="${td}">${esc(x.fk_table)} → ${esc(x.other_table)}</td>` +
+          `<td style="${td}">${hit}</td><td style="${td}">${icon[x.verdict] || "❓"} ${esc(x.verdict)}</td></tr>`;
+      }).join("") + "</table>" +
+      `<div class="hint" style="margin-top:4px">✅≥90% 健康 · ⚠️&lt;90% 脏外键（部分边悬空，属性锚定查询不受影响） · 🚨0% 死外键（整条边会物化成幽灵，建议改配置）</div>`;
+  } catch (e) {
+    box.className = "errbox";
+    box.textContent = "检查失败：\n" + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function onObdaInput(value) {
   draft.edited_obda = value;
   obdaEdited = true;

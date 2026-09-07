@@ -38,12 +38,47 @@ async function api(path, opts = {}) {
 async function loadDraft() {
   try {
     const r = await api("/api/builder/draft");
-    draft = r.exists ? r.draft : defaultDraft();
+    if (r.exists) {
+      draft = r.draft;
+    } else {
+      draft = await autoImportOntology();
+    }
   } catch {
     draft = defaultDraft();
   }
   renderAll();
   $("save-status").textContent = "草稿就绪";
+}
+
+// 无草稿但已上传本体 → 自动解析回草稿并落盘，打开即可编辑导入的内容
+async function autoImportOntology() {
+  try {
+    const s = await api("/api/status");
+    if (!s.ontology) return defaultDraft();
+    const r = await api("/api/builder/import", { method: "POST" });
+    const d = r.draft || defaultDraft();
+    const n = `${d.classes.length} 类 · ${d.objectProperties.length} 对象属性 · ${d.dataProperties.length} 数据属性`;
+    try {
+      await api("/api/builder/draft", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(d),
+      });
+    } catch {}
+    const box = $("import-warnings");
+    if (box) {
+      const skipped = r.skipped || {};
+      let lines = (r.warnings || []).map(w => `<li>${esc(w)}</li>`).join("");
+      if (skipped.foreign && skipped.foreign.length)
+        lines += `<li>外来命名空间元素 ${skipped.foreign.length} 个已跳过</li>`;
+      box.innerHTML = `<button class="close" onclick="this.parentElement.style.display='none'">✕</button>
+        <h4>已自动导入当前已保存的本体（${n}），可直接编辑</h4>${lines ? `<ul>${lines}</ul>` : ""}`;
+      box.style.display = "block";
+    }
+    return d;
+  } catch {
+    return defaultDraft();
+  }
 }
 
 function defaultDraft() {
