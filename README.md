@@ -37,7 +37,14 @@ docker run -d --name easy-ontology \
 
 **容器启动后，浏览器访问 `http://localhost:8010`** 即可进入控制台（部署在其他机器就把 `localhost` 换成机器 IP）。
 
-> 国内拉取 Docker Hub 慢或超时？配置镜像加速器，或代理放行 `registry-1.docker.io`。
+> **国内拉取慢或报错？** 国内直连 Docker Hub 经常超时，把镜像名加上国内加速前缀即可（实测可用）：
+>
+> ```bash
+> # 其余参数同上，仅替换最后一行镜像名
+> docker.1ms.run/zddsl/easy-ontology:latest
+> ```
+>
+> 加速站偶尔失效，换其他可用加速前缀同样有效；或有代理就直接给 Docker 配上。
 
 源码构建：`git clone https://github.com/zddsl/easy-ontology.git && cd easy-ontology && docker compose --profile prod up -d --build`
 
