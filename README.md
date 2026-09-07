@@ -70,6 +70,8 @@ docker run -d --name easy-ontology \
 打开 `http://localhost:8010` 即可使用。数据（本体/映射/配置）持久化在 `easy-ontology-data` 卷里。
 
 > 数据库在宿主机上？host 填 `host.docker.internal` 即可连通。
+>
+> 国内拉取 Docker Hub 慢或超时？给 Docker 配置镜像加速器（如阿里云个人加速地址），或在代理工具里放行 `registry-1.docker.io` 后重试。
 
 ### 方式二：源码构建
 
