@@ -136,6 +136,13 @@
           <option value="materialized">物化（查已生成数据）</option>
         </select>
       </label>
+      <label class="hint" title="问答允许的最大关联跳数（本体最大支持跳数）：跳数越大可答越深的多跳问题，枚举越慢">最大跳数
+        <select id="ask-hops">
+          <option>1</option><option>2</option><option>3</option>
+          <option selected>4</option><option>5</option><option>6</option>
+          <option>7</option><option>8</option>
+        </select>
+      </label>
       <button class="btn primary" id="btn-ask" onclick="askLLM()">问</button>
     </div>
   </div>
@@ -198,7 +205,7 @@
   </div>
 </div>
 
-<script src="app.js?v=37"></script>
+<script src="app.js?v=40"></script>
 <script src="ws.js?v=3"></script>
 </body>
 </html>

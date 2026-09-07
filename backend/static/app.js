@@ -169,7 +169,8 @@ async function uploadOntology() {
   $("ontology-result").textContent = "上传中…";
   try {
     const r = await api("/api/files/ontology", { method: "POST", body: fd });
-    $("ontology-result").textContent = `✓ ${r.triples} 三元组 (${r.format})`;
+    $("ontology-result").textContent =
+      `✓ ${r.triples} 三元组 (${r.format})` + (r.label_warning ? `  ${r.label_warning.message}` : "");
     refreshGraph();
   } catch (e) { $("ontology-result").textContent = "✗"; showError(e.message); }
 }
@@ -321,13 +322,34 @@ function buildApiCard() {
       <table class="api-params">
         <tr><td>question</td><td>中文问题（必填）</td></tr>
         <tr><td>route</td><td><b>virtual</b>（默认）｜<b>materialized</b></td></tr>
+        <tr><td>max_hops</td><td>可选，路径库最大跳数 1~8，缺省 4；越大可答越深的多跳问题</td></tr>
       </table>
       <div class="api-curl-wrap">
         <button class="btn small" onclick="copyApi(this)">复制</button>
         <pre>curl -X POST "${origin}/api/ask" -H "Content-Type: application/json" \\
-  -d "{\\"question\\": \\"工单一共有多少条\\", \\"route\\": \\"virtual\\"}"</pre>
+  -d "{\\"question\\": \\"工单一共有多少条\\", \\"route\\": \\"virtual\\", \\"max_hops\\": 4}"</pre>
       </div>
       <div class="hint">需先在顶栏「配置」中设置 LLM API Key；返回 <code>{answer, sparql, csv}</code></div>
+    </div>
+    <div class="api-sec">
+      <h4>本体 / 映射文本导出</h4>
+      <div class="api-line"><code>GET ${origin}/api/ontology/rdf</code></div>
+      <table class="api-params">
+        <tr><td>无参数</td><td>返回当前工作空间本体的 RDF/XML 原文</td></tr>
+      </table>
+      <div class="api-curl-wrap">
+        <button class="btn small" onclick="copyApi(this)">复制</button>
+        <pre>curl ${origin}/api/ontology/rdf -o ontology.rdf</pre>
+      </div>
+      <div class="api-line" style="margin-top:10px"><code>GET ${origin}/api/mapping/obda</code></div>
+      <table class="api-params">
+        <tr><td>无参数</td><td>返回当前工作空间已保存映射的 .obda 原文</td></tr>
+      </table>
+      <div class="api-curl-wrap">
+        <button class="btn small" onclick="copyApi(this)">复制</button>
+        <pre>curl ${origin}/api/mapping/obda -o mapping.obda</pre>
+      </div>
+      <div class="hint">两者都跟随当前激活工作空间；未上传/保存时返回 404</div>
     </div>
     <div class="api-sec">
       <h4>本体摘要（LLM 提示词）</h4>
@@ -828,17 +850,21 @@ async function askLLM() {
   $("ask-details").style.display = "none";
   try {
     const route = $("ask-route").value;
+    const maxHops = parseInt($("ask-hops").value, 10) || 4;
     const r = await api("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q, route: route }),
+      body: JSON.stringify({ question: q, route: route, max_hops: maxHops }),
     });
     $("ask-answer").textContent = r.answer;
     $("ask-sparql").textContent = r.sparql;
     $("query-text").value = r.sparql;
-    $("ask-csv").textContent = r.csv;
+    $("ask-csv").textContent = (r.csv || "") + (r.used_paths ? "\n\n【本次使用的类路径】\n" + r.used_paths : "");
     const t = r.timings;
-    $("ask-meta").textContent = `耗时：生成 SPARQL ${t.gen_ms}ms · 执行 ${t.sparql_ms}ms · 生成回答 ${t.answer_ms}ms`;
+    $("ask-meta").textContent = `耗时：生成 SPARQL ${t.gen_ms}ms · 执行 ${t.sparql_ms}ms · 生成回答 ${t.answer_ms}ms`
+      + ` · 跳数上限 ${r.max_hops ?? "-"}`
+      + (r.repaired ? " · ⚠ 首次查询失败，已自动修复重试" : "")
+      + ((r.warnings || []).length ? " · 路径库：" + r.warnings.join("；") : "");
     $("ask-details").style.display = "block";
   } catch (e) {
     $("ask-error").textContent = "✗ " + e.message;
