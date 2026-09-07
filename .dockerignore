@@ -11,3 +11,9 @@ playground/build/
 # 本机应急脚本
 run.bat
 build_playground.bat
+
+# 私有数据与一次性脚本（含连接示例密码，绝不进构建上下文）
+hd_simple.nt
+generate_nt_from_mysql.py
+generate_nt_from_mysql.sh
+validate_nt.py

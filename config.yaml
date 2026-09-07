@@ -31,7 +31,7 @@ db_types:
     url_template: "jdbc:dm://{host}:{port}"
     url_params: ""
     ping_classpath: "/app/ontop-cli-5.5.0/jdbc/*"
-    hint: "达梦 URL 不带库名（schema 即用户）；映射 source 表名需全限定带引号，如 \"HD_SAAS\".\"WORKORDER\""
+    hint: "达梦 URL 不带库名（schema 即用户）；映射 source 表名需全限定带引号，如 \"MYSCHEMA\".\"MYTABLE\""
 
 paths:
   data_dir: /app/data              # 唯一事实源：本体/映射/properties/日志都在这

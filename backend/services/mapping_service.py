@@ -335,7 +335,7 @@ def generate_obda(draft: dict, elements: dict, db_type: str = "mysql", scope: st
 
     def table_ref(t: str) -> str:
         # dm8：全限定引用；带引号标识符在达梦大小写敏感，而达梦对象名全大写，
-        # 草稿表名可能是 MySQL 下拉选的小写 → 必须大写化，否则 "HD_SAAS"."asset" 查不到表
+        # 草稿表名可能是 MySQL 下拉选的小写 → 必须大写化，否则 "MYSCHEMA"."asset" 查不到表
         return f'"{scope}"."{t.upper()}"' if db_type == "dm8" and scope else t
 
     mapped = {c["iri"]: c for c in draft["classes"] if c.get("table") and c.get("pk")}
